@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Grea San Jave — Payments, Sales &amp; Expenses (Modules 7 · 8 · 9)</title>
+<title>Grea San Jave — Modules 7 · 8 · 9</title>
+<link rel="stylesheet" href="anika.css">
 <style>
 /* ==========================================================================
    anika.css — shared stylesheet for Module 1/2/3 (Login&Signup, Account
@@ -963,14 +964,22 @@ tbody tr:hover {
     <div class="brand-text"><span class="secondary">Grea</span> San <span class="accent">Jave</span></div>
   </div>
   <nav class="app-nav">
-    <a href="#" id="navPayments" class="active" onclick="showSection('payments'); return false;">Payments &amp; Receipts</a>
-    <a href="#" id="navSales" onclick="showSection('sales'); return false;">Sales Reports</a>
-    <a href="#" id="navExpenses" onclick="showSection('expenses'); return false;">Expenses</a>
+    <a href="#" id="navPayments" class="active" onclick="showSection('payments'); return false;">Module 7 — Payments &amp; Receipts</a>
+    <a href="#" id="navSales" onclick="showSection('sales'); return false;">Module 8 — Sales Reports</a>
+    <a href="#" id="navExpenses" onclick="showSection('expenses'); return false;">Module 9 — Expenses</a>
   </nav>
   <div class="session-info"><span>Owner panel — Modules 7, 8, 9</span></div>
 </header>
 
 <main>
+
+<div class="card system-status-card" id="systemStatusCard">
+  <div class="system-status-line"><span class="status-dot" id="systemStatusDot"></span><strong id="systemStatusTitle">Starting system…</strong></div>
+  <div id="systemStatusText" class="field-hint">Initializing Modules 7–9 and demo records.</div>
+  <div class="status-actions">
+    <button type="button" class="btn btn-secondary btn-small" id="btnResetDemo">Reset demo data</button>
+  </div>
+</div>
 
 <div class="demo-banner">
   <strong>DEMO DATA LOADED</strong>
@@ -1196,13 +1205,29 @@ tbody tr:hover {
 </div>
 
 <script>
-/* MODULE 7 — PAYMENTS & RECEIPTS
-   Input -> Process -> Output
-*/
+/* Shared helpers for Grea San Jave Modules 7–9. */
 (function () {
   'use strict';
+  window.gsToast = function (message, type) {
+    var container = document.getElementById('toastContainer'); if (!container) return;
+    var item = document.createElement('div'); item.className = 'toast ' + (type === 'error' ? 'toast-error' : 'toast-success'); item.textContent = message; container.appendChild(item);
+    window.setTimeout(function () { if (item.parentNode) item.parentNode.removeChild(item); }, 3500);
+  };
+  window.gsFormatPeso = function (n) { return '₱' + Number(n || 0).toLocaleString('en-PH', {minimumFractionDigits:2, maximumFractionDigits:2}); };
+  window.gsEscapeHtml = function (value) { return String(value == null ? '' : value).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); };
+  window.gsTodayKey = function () { var d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); };
+  window.gsOffsetKey = function (offset) { var d=new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate()+Number(offset||0)); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); };
+  window.gsSetSystemStatus = function (title,message,ok) { var t=document.getElementById('systemStatusTitle'), m=document.getElementById('systemStatusText'), d=document.getElementById('systemStatusDot'); if(t)t.textContent=title; if(m)m.textContent=message; if(d)d.className='status-dot '+(ok?'status-ok':'status-error'); };
+  window.gsValue = function(id){var e=document.getElementById(id);return e?e.value:'';};
+  window.gsSetError = function(id,msg){var e=document.getElementById(id);if(e)e.textContent=msg||'';};
+  window.gsEmptyRow = function(n,msg){return '<tr class="empty-row"><td colspan="'+n+'">'+gsEscapeHtml(msg)+'</td></tr>';};
+  window.gsDateTime = function(v){var d=new Date(v);return isNaN(d.getTime())?'—':d.toLocaleString('en-PH');};
+  window.gsFail = function(error){return {ok:false,error:error};};
+})();
 
-  window.PaymentsModule = {
+(function(){
+  'use strict';
+window.PaymentsModule = {
     orders: [],
     pending: [],
     payments: [],
@@ -1213,13 +1238,14 @@ tbody tr:hover {
 
     init: function (orders, hooks) {
       this.orders = Array.isArray(orders) ? orders : [];
-      this.onPaymentReceived = hooks && hooks.onPaymentReceived ? hooks.onPaymentReceived : null;
       this.pending = [];
       this.payments = [];
       this.receipts = [];
       this.nextPaymentId = 1;
       this.nextReceiptId = 1;
+      this.onPaymentReceived = hooks && typeof hooks.onPaymentReceived === 'function' ? hooks.onPaymentReceived : null;
       this.bindEvents();
+      this.updateProofRequirement();
       this.populateOrders();
       this.renderAll();
     },
@@ -1228,36 +1254,16 @@ tbody tr:hover {
       var form = document.getElementById('pmForm');
       var method = document.getElementById('pmMethod');
       if (form && !form.dataset.bound) {
-        form.addEventListener('submit', function (e) {
-          e.preventDefault();
+        form.addEventListener('submit', function (event) {
+          event.preventDefault();
           PaymentsModule.submitFromForm();
         });
         form.dataset.bound = '1';
       }
       if (method && !method.dataset.bound) {
-        method.addEventListener('change', function () {
-          PaymentsModule.updateProofRequirement();
-        });
+        method.addEventListener('change', this.updateProofRequirement);
         method.dataset.bound = '1';
       }
-    },
-
-    populateOrders: function () {
-      var select = document.getElementById('pmOrderSelect');
-      if (!select) return;
-      var html = '';
-      var eligible = this.orders.filter(function (o) {
-        return o && o.status !== 'cancelled';
-      });
-      eligible.forEach(function (o) {
-        var paid = PaymentsModule.getConfirmedTotal(o.orderId);
-        var remaining = Math.max(0, Number(o.totalPrice || 0) - paid);
-        if (remaining > 0) {
-          html += '<option value="' + o.orderId + '">Order #' + o.orderId + ' — ' +
-            escapeHtml(o.customerName || 'Customer') + ' — ' + money(remaining) + ' remaining</option>';
-        }
-      });
-      select.innerHTML = html || '<option value="">No unpaid orders</option>';
     },
 
     updateProofRequirement: function () {
@@ -1265,40 +1271,50 @@ tbody tr:hover {
       var wrap = document.getElementById('pmProofWrap');
       var proof = document.getElementById('pmProof');
       if (!method || !wrap) return;
-      var needsProof = method.value === 'GCash' || method.value === 'Bank Transfer';
-      wrap.style.display = needsProof ? '' : 'none';
-      if (proof) proof.required = needsProof;
+      var required = method.value === 'GCash' || method.value === 'Bank Transfer';
+      wrap.style.display = required ? '' : 'none';
+      if (proof) proof.required = required;
+    },
+
+    populateOrders: function () {
+      var select = document.getElementById('pmOrderSelect');
+      if (!select) return;
+      var options = [];
+      this.orders.forEach(function (order) {
+        if (!order || order.status === 'cancelled') return;
+        var paid = PaymentsModule.getConfirmedTotal(order.orderId);
+        var pending = PaymentsModule.getPendingTotal(order.orderId);
+        var remaining = Number(order.totalPrice || 0) - paid - pending;
+        if (remaining > 0.009) {
+          options.push('<option value="' + Number(order.orderId) + '">Order #' + Number(order.orderId) + ' — ' +
+            gsEscapeHtml(order.customerName || 'Customer') + ' — ' + gsFormatPeso(remaining) + ' remaining</option>');
+        }
+      });
+      select.innerHTML = options.length ? options.join('') : '<option value="">No unpaid orders</option>';
+      select.disabled = !options.length;
     },
 
     submitFromForm: function () {
-      clearError('pmFormError');
-      var orderId = Number(value('pmOrderSelect'));
-      var amount = Number(value('pmAmount'));
-      var method = value('pmMethod');
+      gsSetError('pmFormError', '');
       var proofInput = document.getElementById('pmProof');
-      var proof = proofInput && proofInput.files.length ? proofInput.files[0].name : '';
-      var isDown = !!(document.getElementById('pmIsDown') && document.getElementById('pmIsDown').checked);
-
       var result = this.recordPayment({
-        orderId: orderId,
-        amount: amount,
-        paymentMethod: method,
-        isDownPayment: isDown,
-        proofOfPaymentFile: proof
+        orderId: Number(gsValue('pmOrderSelect')),
+        amount: Number(gsValue('pmAmount')),
+        paymentMethod: gsValue('pmMethod'),
+        isDownPayment: !!document.getElementById('pmIsDown') && document.getElementById('pmIsDown').checked,
+        proofOfPaymentFile: proofInput && proofInput.files.length ? proofInput.files[0].name : ''
       });
-
       if (!result.ok) {
-        setError('pmFormError', result.error);
+        gsSetError('pmFormError', result.error);
+        gsToast(result.error, 'error');
         return;
       }
-
-      /* INPUT accepted -> PROCESS queues the payment -> OUTPUT appears in FIFO table. */
       this.renderAll();
       this.populateOrders();
       var form = document.getElementById('pmForm');
       if (form) form.reset();
       this.updateProofRequirement();
-      toast('Payment queued for confirmation.', 'success');
+      gsToast('Payment queued for confirmation.', 'success');
     },
 
     recordPayment: function (data) {
@@ -1307,22 +1323,18 @@ tbody tr:hover {
       var amount = Number(data.amount);
       var method = data.paymentMethod;
       var proof = data.proofOfPaymentFile || '';
+      if (!order) return gsFail('Please select a valid unpaid order.');
+      if (!Number.isFinite(amount) || amount <= 0) return gsFail('Payment amount must be greater than zero.');
+      if (['Cash', 'GCash', 'Bank Transfer'].indexOf(method) === -1) return gsFail('Invalid payment method.');
+      if ((method === 'GCash' || method === 'Bank Transfer') && !proof) return gsFail('Proof of payment is required for GCash or Bank Transfer.');
 
-      if (!order) return fail('Please select a valid order.');
-      if (!Number.isFinite(amount) || amount <= 0) return fail('Payment amount must be greater than zero.');
-      if (!['Cash', 'GCash', 'Bank Transfer'].includes(method)) return fail('Invalid payment method.');
-      if ((method === 'GCash' || method === 'Bank Transfer') && !proof) {
-        return fail('Proof of payment is required for GCash or Bank Transfer.');
-      }
-
-      var alreadyPaid = this.getConfirmedTotal(order.orderId) + this.getPendingTotal(order.orderId);
-      var remaining = Number(order.totalPrice || 0) - alreadyPaid;
-      if (remaining <= 0) return fail('This order is already fully paid.');
-      if (amount > remaining + 0.0001) return fail('Payment cannot exceed the remaining balance of ' + money(remaining) + '.');
+      var remaining = Number(order.totalPrice || 0) - this.getConfirmedTotal(order.orderId) - this.getPendingTotal(order.orderId);
+      if (remaining <= 0.009) return gsFail('This order is already fully paid.');
+      if (amount > remaining + 0.009) return gsFail('Payment cannot exceed the remaining balance of ' + gsFormatPeso(remaining) + '.');
 
       var queued = {
-        queueId: Date.now() + Math.random(),
-        orderId: order.orderId,
+        queueId: 'Q' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+        orderId: Number(order.orderId),
         customerName: order.customerName || 'Customer',
         amount: amount,
         paymentMethod: method,
@@ -1336,47 +1348,50 @@ tbody tr:hover {
 
     confirmPayment: function (queueId) {
       var index = this.pending.findIndex(function (p) { return String(p.queueId) === String(queueId); });
-      if (index < 0) return fail('Payment is no longer in the confirmation queue.');
-      if (index !== 0) return fail('Payments must be confirmed in FIFO order.');
+      if (index < 0) { gsToast('Payment is no longer in the queue.', 'error'); return gsFail('Payment is no longer in the queue.'); }
+      if (index !== 0) { gsToast('Payments must be confirmed in FIFO order.', 'error'); return gsFail('Payments must be confirmed in FIFO order.'); }
 
-      var p = this.pending.shift();
-      var order = this.orders.find(function (o) { return Number(o.orderId) === Number(p.orderId); });
-      if (!order) return fail('The linked order no longer exists.');
+      var queued = this.pending.shift();
+      var order = this.orders.find(function (o) { return Number(o.orderId) === Number(queued.orderId); });
+      if (!order) return gsFail('The linked order no longer exists.');
 
       var payment = {
         paymentId: this.nextPaymentId++,
-        orderId: p.orderId,
-        amount: p.amount,
-        paymentMethod: p.paymentMethod,
-        isDownPayment: p.isDownPayment,
-        proofOfPaymentFile: p.proofOfPaymentFile || null,
+        orderId: Number(queued.orderId),
+        amount: Number(queued.amount),
+        paymentMethod: queued.paymentMethod,
+        isDownPayment: queued.isDownPayment,
+        proofOfPaymentFile: queued.proofOfPaymentFile || null,
         dateReceived: new Date().toISOString()
       };
       this.payments.push(payment);
 
       var paid = this.getConfirmedTotal(order.orderId);
       var total = Number(order.totalPrice || 0);
-      if (paid >= total) {
+      if (paid >= total - 0.009) {
         order.paymentStatus = 'fullyPaid';
-        order.downPaymentAmount = order.downPaymentAmount || 0;
-        var receipt = this.createReceipt(order);
-        if (this.onPaymentReceived) this.onPaymentReceived('PAYMENT', order, payment);
+        order.downPaymentAmount = total;
+        if (!this.receipts.some(function (r) { return Number(r.orderId) === Number(order.orderId); })) {
+          this.createReceipt(order);
+        }
+        order.status = order.status === 'cancelled' ? order.status : order.status;
+        if (this.onPaymentReceived) this.onPaymentReceived('PAYMENT_CONFIRMED', order, payment);
         this.renderAll();
         this.populateOrders();
-        toast('Payment confirmed. Receipt #' + receipt.receiptId + ' issued.', 'success');
-      } else if (p.isDownPayment || paid > 0) {
+        gsToast('Payment confirmed and receipt issued for Order #' + order.orderId + '.', 'success');
+      } else {
         order.paymentStatus = 'downPaymentPaid';
         order.downPaymentAmount = paid;
-        if (this.onPaymentReceived) this.onPaymentReceived('PAYMENT', order, payment);
+        if (this.onPaymentReceived) this.onPaymentReceived('PAYMENT_CONFIRMED', order, payment);
         this.renderAll();
         this.populateOrders();
-        toast('Payment confirmed. Remaining balance: ' + money(total - paid), 'success');
+        gsToast('Payment confirmed. Remaining balance: ' + gsFormatPeso(total - paid) + '.', 'success');
       }
       return { ok: true, payment: payment };
     },
 
     confirmNextPayment: function () {
-      if (!this.pending.length) return fail('No payments are waiting for confirmation.');
+      if (!this.pending.length) return gsFail('No payments are waiting for confirmation.');
       return this.confirmPayment(this.pending[0].queueId);
     },
 
@@ -1394,7 +1409,7 @@ tbody tr:hover {
       var existing = this.receipts.find(function (r) { return Number(r.orderId) === Number(order.orderId); });
       if (existing) return existing;
       var receipt = {
-        receiptId: this.nextReceiptId++, orderId: order.orderId,
+        receiptId: this.nextReceiptId++, orderId: Number(order.orderId),
         customerName: order.customerName || 'Customer', fileName: order.fileName || '',
         pages: Number(order.pages || 0), copies: Number(order.copies || 0),
         colorTier: order.colorTier || '', totalPrice: Number(order.totalPrice || 0),
@@ -1404,91 +1419,77 @@ tbody tr:hover {
       return receipt;
     },
 
-    renderAll: function () {
-      this.renderPending();
-      this.renderPayments();
-      this.renderReceipts();
-    },
+    renderAll: function () { this.renderPending(); this.renderPayments(); this.renderReceipts(); },
 
     renderPending: function () {
       var body = document.getElementById('pmPendingBody');
       if (!body) return;
-      if (!this.pending.length) { body.innerHTML = emptyRow(8, 'No payments waiting for confirmation.'); return; }
+      if (!this.pending.length) { body.innerHTML = gsEmptyRow(8, 'No payments waiting for confirmation.'); return; }
       body.innerHTML = this.pending.map(function (p, i) {
-        return '<tr><td>' + (i + 1) + '</td><td>#' + p.orderId + '</td><td>' + escapeHtml(p.customerName) +
-          '</td><td>' + money(p.amount) + '</td><td>' + escapeHtml(p.paymentMethod) + '</td><td>' +
-          (p.isDownPayment ? 'Down payment' : 'Full/regular payment') + '</td><td>' +
-          (p.proofOfPaymentFile ? escapeHtml(p.proofOfPaymentFile) : '—') + '</td><td>' +
-          '<button class="btn btn-success btn-small" onclick="PaymentsModule.confirmPayment(\'' + p.queueId + '\')">Confirm</button></td></tr>';
+        return '<tr><td>' + (i + 1) + '</td><td>#' + p.orderId + '</td><td>' + gsEscapeHtml(p.customerName) +
+          '</td><td>' + gsFormatPeso(p.amount) + '</td><td>' + gsEscapeHtml(p.paymentMethod) + '</td><td>' +
+          (p.isDownPayment ? 'Down payment' : 'Regular payment') + '</td><td>' +
+          (p.proofOfPaymentFile ? gsEscapeHtml(p.proofOfPaymentFile) : '—') + '</td><td>' +
+          '<button type="button" class="btn btn-success btn-small" data-confirm-payment="' + gsEscapeHtml(p.queueId) + '">Confirm</button></td></tr>';
       }).join('');
     },
 
     renderPayments: function () {
       var body = document.getElementById('pmPaymentsBody');
       if (!body) return;
-      if (!this.payments.length) { body.innerHTML = emptyRow(8, 'No confirmed payments yet.'); return; }
+      if (!this.payments.length) { body.innerHTML = gsEmptyRow(8, 'No confirmed payments yet.'); return; }
       body.innerHTML = this.payments.map(function (p) {
         var order = PaymentsModule.orders.find(function (o) { return Number(o.orderId) === Number(p.orderId); });
-        return '<tr><td>' + p.paymentId + '</td><td>#' + p.orderId + '</td><td>' + escapeHtml(order ? order.customerName : '—') +
-          '</td><td>' + money(p.amount) + '</td><td>' + escapeHtml(p.paymentMethod) + '</td><td>' +
-          (p.isDownPayment ? 'Down payment' : 'Regular') + '</td><td>' + (p.proofOfPaymentFile ? escapeHtml(p.proofOfPaymentFile) : '—') +
-          '</td><td>' + formatDateTime(p.dateReceived) + '</td></tr>';
+        return '<tr><td>' + p.paymentId + '</td><td>#' + p.orderId + '</td><td>' +
+          gsEscapeHtml(order ? order.customerName : '—') + '</td><td>' + gsFormatPeso(p.amount) +
+          '</td><td>' + gsEscapeHtml(p.paymentMethod) + '</td><td>' + (p.isDownPayment ? 'Down payment' : 'Regular') +
+          '</td><td>' + (p.proofOfPaymentFile ? gsEscapeHtml(p.proofOfPaymentFile) : '—') + '</td><td>' + gsDateTime(p.dateReceived) + '</td></tr>';
       }).join('');
     },
 
     renderReceipts: function () {
       var body = document.getElementById('pmReceiptsBody');
       if (!body) return;
-      if (!this.receipts.length) { body.innerHTML = emptyRow(6, 'Receipts will appear after an order is fully paid.'); return; }
+      if (!this.receipts.length) { body.innerHTML = gsEmptyRow(6, 'Receipts will appear after an order is fully paid.'); return; }
       body.innerHTML = this.receipts.map(function (r) {
-        return '<tr><td>' + r.receiptId + '</td><td>#' + r.orderId + '</td><td>' + escapeHtml(r.customerName) +
-          '</td><td>' + money(r.totalPrice) + '</td><td>' + formatDateTime(r.dateIssued) + '</td><td>' +
-          '<button class="btn btn-secondary btn-small" onclick="PaymentsModule.showReceipt(' + r.receiptId + ')">View</button></td></tr>';
+        return '<tr><td>' + r.receiptId + '</td><td>#' + r.orderId + '</td><td>' + gsEscapeHtml(r.customerName) +
+          '</td><td>' + gsFormatPeso(r.totalPrice) + '</td><td>' + gsDateTime(r.dateIssued) + '</td><td>' +
+          '<button type="button" class="btn btn-secondary btn-small" data-view-receipt="' + r.receiptId + '">View</button></td></tr>';
       }).join('');
     },
 
     showReceipt: function (receiptId) {
-      var r = this.receipts.find(function (x) { return Number(x.receiptId) === Number(receiptId); });
-      if (!r) return;
+      var receipt = this.receipts.find(function (r) { return Number(r.receiptId) === Number(receiptId); });
       var body = document.getElementById('receiptModalBody');
       var modal = document.getElementById('receiptModal');
-      if (!body || !modal) return;
-      body.innerHTML = '<p><strong>Receipt #' + r.receiptId + '</strong></p>' +
-        '<p>Order: #' + r.orderId + '<br>Customer: ' + escapeHtml(r.customerName) +
-        '<br>File: ' + escapeHtml(r.fileName || '—') + '<br>Pages: ' + r.pages +
-        '<br>Copies: ' + r.copies + '<br>Color tier: ' + escapeHtml(r.colorTier || '—') +
-        '<br>Total paid: <strong>' + money(r.totalPrice) + '</strong><br>Issued: ' + formatDateTime(r.dateIssued) + '</p>';
-      modal.className = 'modal-overlay open';
+      if (!receipt || !body || !modal) return;
+      body.innerHTML = '<p><strong>Receipt #' + receipt.receiptId + '</strong></p>' +
+        '<p>Order: #' + receipt.orderId + '<br>Customer: ' + gsEscapeHtml(receipt.customerName) +
+        '<br>File: ' + gsEscapeHtml(receipt.fileName || '—') + '<br>Pages: ' + receipt.pages +
+        '<br>Copies: ' + receipt.copies + '<br>Color tier: ' + gsEscapeHtml(receipt.colorTier || '—') +
+        '<br>Total paid: <strong>' + gsFormatPeso(receipt.totalPrice) + '</strong><br>Issued: ' + gsDateTime(receipt.dateIssued) + '</p>';
+      modal.classList.add('open');
     }
   };
 
-  function value(id) { var e = document.getElementById(id); return e ? e.value : ''; }
-  function money(n) { return '₱' + Number(n || 0).toLocaleString('en-PH', {minimumFractionDigits:2, maximumFractionDigits:2}); }
-  function escapeHtml(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
-  function emptyRow(n, text) { return '<tr class="empty-row"><td colspan="' + n + '">' + escapeHtml(text) + '</td></tr>'; }
-  function fail(error) { return {ok:false,error:error}; }
-  function clearError(id) { var e=document.getElementById(id); if(e)e.textContent=''; }
-  function setError(id,msg) { var e=document.getElementById(id); if(e)e.textContent=msg; }
-  function formatDateTime(s) { var d=new Date(s); return isNaN(d.getTime()) ? '—' : d.toLocaleString('en-PH'); }
-  function toast(msg, type) { if (typeof window.gsToast === 'function') window.gsToast(msg,type); else if (type !== 'success') console.warn(msg); }
-  window.gsFormatPeso = window.gsFormatPeso || money;
-  window.PaymentsModule._helpersReady = true;
+  /* Event delegation keeps dynamically-created buttons functional. */
+  document.addEventListener('click', function (event) {
+    var confirmButton = event.target.closest('[data-confirm-payment]');
+    if (confirmButton) PaymentsModule.confirmPayment(confirmButton.getAttribute('data-confirm-payment'));
+    var receiptButton = event.target.closest('[data-view-receipt]');
+    if (receiptButton) PaymentsModule.showReceipt(receiptButton.getAttribute('data-view-receipt'));
+  });
+
 })();
 
-
-/* MODULE 8 — SALES REPORTING
-   Input -> Process -> Output
-   Reads completed Orders + Payments + Module 9 Expenses.
-*/
-(function () {
+(function(){
   'use strict';
-
-  window.SalesModule = {
+window.SalesModule = {
     orders: [],
     expenseProvider: function () { return []; },
     rows: [],
     sortField: 'reportDate',
-    sortDirection: 'desc',
+    sortDirection: 'asc',
 
     init: function (orders) {
       this.orders = Array.isArray(orders) ? orders : [];
@@ -1502,37 +1503,31 @@ tbody tr:hover {
     },
 
     bindEvents: function () {
-      var btn = document.getElementById('btnSrGenerate');
-      if (btn && !btn.dataset.bound) {
-        btn.addEventListener('click', function () { SalesModule.generateReport(); });
-        btn.dataset.bound = '1';
+      var button = document.getElementById('btnSrGenerate');
+      if (button && !button.dataset.bound) {
+        button.addEventListener('click', this.generateReport.bind(this));
+        button.dataset.bound = '1';
       }
     },
 
     setDefaultDates: function () {
       var from = document.getElementById('srFrom');
       var to = document.getElementById('srTo');
-      if (from && !from.value) from.value = offsetDate(-14);
-      if (to && !to.value) to.value = todayKey();
+      if (from && !from.value) from.value = gsOffsetKey(-14);
+      if (to && !to.value) to.value = gsTodayKey();
     },
 
-    refresh: function () { this.generateReport(); },
+    refresh: function () { return this.generateReport(); },
 
     generateReport: function () {
-      var from = value('srFrom') || offsetDate(-14);
-      var to = value('srTo') || todayKey();
-      var period = value('srPeriod') || 'daily';
-      var examWeek = !!(document.getElementById('srExamWeek') && document.getElementById('srExamWeek').checked);
-
-      if (from > to) {
-        var temp = from; from = to; to = temp;
-        var f = document.getElementById('srFrom'), t = document.getElementById('srTo');
-        if (f) f.value = from; if (t) t.value = to;
-      }
-
-      /* INPUT: date range + period + exam-week flag.
-         PROCESS: aggregate completed orders and expenses into report periods.
-         OUTPUT: summary cards + report table. */
+      var from = gsValue('srFrom') || gsOffsetKey(-14);
+      var to = gsValue('srTo') || gsTodayKey();
+      var period = gsValue('srPeriod') || 'daily';
+      var examWeek = !!document.getElementById('srExamWeek') && document.getElementById('srExamWeek').checked;
+      if (from > to) { var swap = from; from = to; to = swap; }
+      var fromEl = document.getElementById('srFrom'), toEl = document.getElementById('srTo');
+      if (fromEl) fromEl.value = from;
+      if (toEl) toEl.value = to;
       this.rows = this.buildRows(from, to, period, examWeek);
       this.renderStats(this.rows);
       this.renderTable();
@@ -1540,59 +1535,59 @@ tbody tr:hover {
     },
 
     buildRows: function (from, to, period, examWeek) {
-      var completed = this.orders.filter(function (o) {
-        var d = orderDate(o);
-        return o && o.status === 'done' && d >= from && d <= to;
+      var groups = {};
+      var completed = this.orders.filter(function (order) {
+        if (!order || order.status !== 'done') return false;
+        var date = String(order.dateCompleted || order.dateAdded || '').slice(0, 10);
+        return date >= from && date <= to;
+      });
+      completed.forEach(function (order) {
+        var key = reportGroupKey(order.dateCompleted || order.dateAdded, period);
+        if (!groups[key]) groups[key] = makeReportRow(key, examWeek);
+        groups[key].totalOrders += 1;
+        groups[key].totalRushOrders += order.isRush ? 1 : 0;
+        groups[key].totalRevenue += Number(order.totalPrice || 0);
       });
       var expenses = this.expenseProvider() || [];
-      var filteredExpenses = expenses.filter(function (e) { return e.dateIncurred >= from && e.dateIncurred <= to; });
-      var groups = {};
-
-      completed.forEach(function (o) {
-        var key = groupKey(orderDate(o), period);
-        if (!groups[key]) groups[key] = makeRow(key, examWeek);
-        groups[key].totalOrders++;
-        groups[key].totalRushOrders += o.isRush ? 1 : 0;
-        groups[key].totalRevenue += Number(o.totalPrice || 0);
+      expenses.forEach(function (expense) {
+        var date = String(expense.dateIncurred || '').slice(0, 10);
+        if (date < from || date > to) return;
+        var key = reportGroupKey(date, period);
+        if (!groups[key]) groups[key] = makeReportRow(key, examWeek);
+        groups[key].totalExpenses += Number(expense.amount || 0);
       });
-
-      filteredExpenses.forEach(function (e) {
-        var key = groupKey(e.dateIncurred, period);
-        if (!groups[key]) groups[key] = makeRow(key, examWeek);
-        groups[key].totalExpenses += Number(e.amount || 0);
+      return Object.keys(groups).sort().map(function (key) {
+        groups[key].netProfit = groups[key].totalRevenue - groups[key].totalExpenses;
+        return groups[key];
       });
-
-      Object.keys(groups).forEach(function (key) { groups[key].netProfit = groups[key].totalRevenue - groups[key].totalExpenses; });
-      return Object.keys(groups).map(function(k){return groups[k];});
     },
 
     renderStats: function (rows) {
-      var orders = rows.reduce(function(s,r){return s+r.totalOrders;},0);
-      var rush = rows.reduce(function(s,r){return s+r.totalRushOrders;},0);
-      var revenue = rows.reduce(function(s,r){return s+r.totalRevenue;},0);
-      var expenses = rows.reduce(function(s,r){return s+r.totalExpenses;},0);
-      setText('srStatOrders', orders);
-      setText('srStatRush', rush);
-      setText('srStatRevenue', peso(revenue));
-      setText('srStatExpenses', peso(expenses));
-      setText('srStatNet', peso(revenue-expenses));
+      var orders = rows.reduce(function (sum, row) { return sum + row.totalOrders; }, 0);
+      var rush = rows.reduce(function (sum, row) { return sum + row.totalRushOrders; }, 0);
+      var revenue = rows.reduce(function (sum, row) { return sum + row.totalRevenue; }, 0);
+      var expenses = rows.reduce(function (sum, row) { return sum + row.totalExpenses; }, 0);
+      setText('srStatOrders', orders); setText('srStatRush', rush);
+      setText('srStatRevenue', gsFormatPeso(revenue)); setText('srStatExpenses', gsFormatPeso(expenses));
+      setText('srStatNet', gsFormatPeso(revenue - expenses));
     },
 
     renderTable: function () {
       var body = document.getElementById('srTableBody');
       if (!body) return;
       var rows = this.rows.slice();
-      var field = this.sortField, dir = this.sortDirection === 'asc' ? 1 : -1;
-      rows.sort(function(a,b){
-        var av=a[field], bv=b[field];
-        if(typeof av==='number' && typeof bv==='number') return (av-bv)*dir;
-        return String(av).localeCompare(String(bv))*dir;
+      var field = this.sortField;
+      var direction = this.sortDirection === 'asc' ? 1 : -1;
+      rows.sort(function (a, b) {
+        var av = a[field], bv = b[field];
+        if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * direction;
+        return String(av).localeCompare(String(bv)) * direction;
       });
-      if (!rows.length) { body.innerHTML='<tr class="empty-row"><td colspan="7">No completed orders or expenses fall inside this date range.</td></tr>'; return; }
-      body.innerHTML = rows.map(function(r){
-        return '<tr><td>' + esc(r.reportDate) + '</td><td>' + r.totalOrders + '</td><td>' + r.totalRushOrders +
-          '</td><td>' + peso(r.totalRevenue) + '</td><td>' + peso(r.totalExpenses) + '</td><td>' + peso(r.netProfit) +
-          '</td><td>' + (r.isExamWeek ? 'Yes' : 'No') + '</td></tr>';
+      if (!rows.length) { body.innerHTML = gsEmptyRow(7, 'No completed orders or expenses fall inside this date range.'); return; }
+      body.innerHTML = rows.map(function (row) {
+        return '<tr><td>' + gsEscapeHtml(row.reportDate) + '</td><td>' + row.totalOrders + '</td><td>' + row.totalRushOrders +
+          '</td><td>' + gsFormatPeso(row.totalRevenue) + '</td><td>' + gsFormatPeso(row.totalExpenses) + '</td><td>' +
+          gsFormatPeso(row.netProfit) + '</td><td>' + (row.isExamWeek ? 'Yes' : 'No') + '</td></tr>';
       }).join('');
     },
 
@@ -1603,274 +1598,228 @@ tbody tr:hover {
     }
   };
 
-  function makeRow(key, exam){return {reportDate:key,totalOrders:0,totalRevenue:0,totalRushOrders:0,totalExpenses:0,netProfit:0,isExamWeek:!!exam};}
-  function groupKey(date, period){
-    if(period==='monthly') return String(date).slice(0,7);
-    if(period==='weekly'){
-      var d=parseDate(date), day=d.getDay(); d.setDate(d.getDate()-(day===0?6:day-1)); return key(d);
+  function makeReportRow(key, examWeek) { return { reportDate: key, totalOrders: 0, totalRevenue: 0, totalRushOrders: 0, totalExpenses: 0, netProfit: 0, isExamWeek: !!examWeek }; }
+  function reportGroupKey(dateValue, period) {
+    var s = String(dateValue || '').slice(0, 10);
+    if (period === 'monthly') return s.slice(0, 7);
+    if (period === 'weekly') {
+      var d = new Date(s + 'T00:00:00');
+      var day = d.getDay();
+      d.setDate(d.getDate() - (day === 0 ? 6 : day - 1));
+      return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
     }
-    return String(date).slice(0,10);
+    return s;
   }
-  function orderDate(o){return String(o.dateCompleted || o.dateAdded || '').slice(0,10);}
-  function parseDate(s){var p=String(s).slice(0,10).split('-');return new Date(Number(p[0]),Number(p[1])-1,Number(p[2]));}
-  function key(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
-  function todayKey(){return key(new Date());}
-  function offsetDate(n){var d=new Date();d.setDate(d.getDate()+n);return key(d);}
-  function value(id){var e=document.getElementById(id);return e?e.value:'';}
-  function setText(id,v){var e=document.getElementById(id);if(e)e.textContent=v;}
-  function peso(n){return '₱'+Number(n||0).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2});}
-  function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
-  window.srTodayKey=todayKey; window.srParseDay=parseDate; window.srDayKey=key;
+  function setText(id, text) { var el = document.getElementById(id); if (el) el.textContent = text; }
+
 })();
 
-
-/* MODULE 9 — EXPENSE MANAGEMENT
-   Input -> Process -> Output
-*/
-(function () {
+(function(){
   'use strict';
-
-  window.ExpensesModule = {
-    expenses: [],
-    users: [],
-    nextExpenseId: 1,
+window.ExpensesModule = {
+    expenses: [], users: [], nextExpenseId: 1,
 
     init: function (seedExpenses) {
-      this.expenses = Array.isArray(seedExpenses) ? seedExpenses.slice() : [];
-      this.nextExpenseId = this.expenses.reduce(function (m, e) { return Math.max(m, Number(e.expenseId) || 0); }, 0) + 1;
+      this.expenses = Array.isArray(seedExpenses) ? seedExpenses.map(function (e) { return Object.assign({}, e); }) : [];
+      this.nextExpenseId = this.expenses.reduce(function (max, e) { return Math.max(max, Number(e.expenseId) || 0); }, 0) + 1;
       this.bindForm();
       this.setDefaultDate();
       this.renderAll();
     },
 
     setUsers: function (users) {
-      this.users = Array.isArray(users) ? users : [];
+      this.users = Array.isArray(users) ? users.slice() : [];
       var select = document.getElementById('exRecordedBy');
       if (!select) return;
-      select.innerHTML = this.users.map(function (u) {
-        return '<option value="' + Number(u.userId) + '">' + esc(u.fullName || u.username || ('User #' + u.userId)) + '</option>';
+      select.innerHTML = this.users.filter(function (u) { return u.role === 'staff' || u.role === 'coOwner'; }).map(function (u) {
+        return '<option value="' + Number(u.userId) + '">' + gsEscapeHtml(u.fullName || u.username) + '</option>';
       }).join('');
     },
 
     bindForm: function () {
       var form = document.getElementById('exForm');
-      if (!form || form.dataset.bound) return;
-      form.addEventListener('submit', function (e) {
-        e.preventDefault();
-        ExpensesModule.submitFromForm();
-      });
-      form.dataset.bound = '1';
+      if (form && !form.dataset.bound) {
+        form.addEventListener('submit', function (event) {
+          event.preventDefault();
+          ExpensesModule.submitFromForm();
+        });
+        form.dataset.bound = '1';
+      }
     },
 
     setDefaultDate: function () {
       var date = document.getElementById('exDate');
-      if (date && !date.value) date.value = todayKey();
+      if (date && !date.value) date.value = gsTodayKey();
     },
 
     submitFromForm: function () {
-      setError('exFormError', '');
+      gsSetError('exFormError', '');
       var result = this.addExpense({
-        category: val('exCategory'),
-        amount: Number(val('exAmount')),
-        dateIncurred: val('exDate'),
-        recordedBy: Number(val('exRecordedBy')),
-        description: val('exDescription').trim()
+        category: gsValue('exCategory'), amount: Number(gsValue('exAmount')), dateIncurred: gsValue('exDate'),
+        recordedBy: Number(gsValue('exRecordedBy')), description: gsValue('exDescription').trim()
       });
-      if (!result.ok) {
-        setError('exFormError', result.error);
-        return;
-      }
+      if (!result.ok) { gsSetError('exFormError', result.error); gsToast(result.error, 'error'); return; }
       this.renderAll();
-      var form = document.getElementById('exForm');
-      if (form) form.reset();
+      var form = document.getElementById('exForm'); if (form) form.reset();
       this.setDefaultDate();
-      toast('Expense added successfully.', 'success');
-      if (window.SalesModule && typeof window.SalesModule.refresh === 'function') window.SalesModule.refresh();
+      gsToast('Expense added successfully.', 'success');
+      if (window.SalesModule) window.SalesModule.refresh();
     },
 
     addExpense: function (data) {
       data = data || {};
-      var allowed = ['Rent','Utilities','Supplies','Equipment Repair','Other'];
-      if (!allowed.includes(data.category)) return fail('Please select a valid expense category.');
-      if (!Number.isFinite(data.amount) || data.amount <= 0) return fail('Expense amount must be greater than zero.');
-      if (!data.dateIncurred) return fail('Please enter the date the expense was incurred.');
-      if (!data.recordedBy) return fail('Please select who recorded the expense.');
-      if (!data.description) return fail('Please enter a description for the expense.');
-
-      var expense = {
-        expenseId: this.nextExpenseId++,
-        category: data.category,
-        amount: Number(data.amount),
-        description: data.description,
-        dateIncurred: data.dateIncurred,
-        recordedBy: Number(data.recordedBy)
-      };
+      var allowed = ['Rent', 'Utilities', 'Supplies', 'Equipment Repair', 'Other'];
+      if (allowed.indexOf(data.category) === -1) return gsFail('Please select a valid expense category.');
+      if (!Number.isFinite(data.amount) || data.amount <= 0) return gsFail('Expense amount must be greater than zero.');
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(data.dateIncurred || '')) return gsFail('Please enter a valid expense date.');
+      if (!this.users.some(function (u) { return Number(u.userId) === Number(data.recordedBy); })) return gsFail('Please select who recorded the expense.');
+      if (!data.description) return gsFail('Please enter a description for the expense.');
+      var expense = { expenseId: this.nextExpenseId++, category: data.category, amount: Number(data.amount), dateIncurred: data.dateIncurred, recordedBy: Number(data.recordedBy), description: data.description };
       this.expenses.push(expense);
-      return {ok:true, expense:expense};
+      return { ok: true, expense: expense };
     },
 
     deleteExpense: function (id) {
       var before = this.expenses.length;
-      this.expenses = this.expenses.filter(function (e) { return Number(e.expenseId) !== Number(id); });
-      if (this.expenses.length === before) return fail('Expense not found.');
-      this.renderAll();
-      if (window.SalesModule && typeof window.SalesModule.refresh === 'function') window.SalesModule.refresh();
-      toast('Expense deleted.', 'success');
-      return {ok:true};
+      this.expenses = this.expenses.filter(function (expense) { return Number(expense.expenseId) !== Number(id); });
+      if (before === this.expenses.length) return gsFail('Expense not found.');
+      this.renderAll(); if (window.SalesModule) window.SalesModule.refresh();
+      gsToast('Expense deleted.', 'success');
+      return { ok: true };
     },
 
     getAllExpenses: function () { return this.expenses.slice(); },
-
-    getTotal: function () {
-      return this.expenses.reduce(function (sum,e) { return sum + Number(e.amount || 0); }, 0);
-    },
+    getTotal: function () { return this.expenses.reduce(function (sum, e) { return sum + Number(e.amount || 0); }, 0); },
 
     getTotalsByCategory: function () {
-      var totals = {Rent:0, Utilities:0, Supplies:0, 'Equipment Repair':0, Other:0};
+      var totals = { Rent: 0, Utilities: 0, Supplies: 0, 'Equipment Repair': 0, Other: 0 };
       this.expenses.forEach(function (e) { totals[e.category] = (totals[e.category] || 0) + Number(e.amount || 0); });
       return totals;
     },
 
-    renderAll: function () {
-      this.renderCategoryTotals();
-      this.renderGrandTotal();
-      this.renderRecords();
-    },
+    renderAll: function () { this.renderCategoryTotals(); this.renderGrandTotal(); this.renderRecords(); },
 
     renderCategoryTotals: function () {
-      var body = document.getElementById('exTotalsBody');
-      if (!body) return;
+      var body = document.getElementById('exTotalsBody'); if (!body) return;
       var totals = this.getTotalsByCategory();
       body.innerHTML = Object.keys(totals).map(function (category) {
-        return '<tr><td>' + esc(category) + '</td><td style="text-align:right;">' + peso(totals[category]) + '</td></tr>';
+        return '<tr><td>' + gsEscapeHtml(category) + '</td><td style="text-align:right;">' + gsFormatPeso(totals[category]) + '</td></tr>';
       }).join('');
     },
 
-    renderGrandTotal: function () {
-      var el = document.getElementById('exGrandTotal');
-      if (el) el.textContent = peso(this.getTotal());
-    },
+    renderGrandTotal: function () { var el = document.getElementById('exGrandTotal'); if (el) el.textContent = gsFormatPeso(this.getTotal()); },
 
     renderRecords: function () {
-      var body = document.getElementById('exTableBody');
-      if (!body) return;
-      if (!this.expenses.length) { body.innerHTML = '<tr class="empty-row"><td colspan="7">No expense records yet.</td></tr>'; return; }
+      var body = document.getElementById('exTableBody'); if (!body) return;
+      if (!this.expenses.length) { body.innerHTML = gsEmptyRow(7, 'No expense records yet.'); return; }
       var users = this.users;
-      body.innerHTML = this.expenses.slice().sort(function(a,b){ return String(b.dateIncurred).localeCompare(String(a.dateIncurred)) || Number(b.expenseId)-Number(a.expenseId); }).map(function(e) {
-        var u = users.find(function(x){ return Number(x.userId)===Number(e.recordedBy); });
-        return '<tr><td>' + e.expenseId + '</td><td>' + esc(e.dateIncurred) + '</td><td>' + esc(e.category) +
-          '</td><td>' + esc(e.description) + '</td><td>' + peso(e.amount) + '</td><td>' +
-          esc(u ? (u.fullName || u.username) : ('User #' + e.recordedBy)) + '</td><td><button class="btn btn-danger btn-small" onclick="ExpensesModule.deleteExpense(' + e.expenseId + ')">Delete</button></td></tr>';
+      body.innerHTML = this.expenses.slice().sort(function (a, b) { return String(b.dateIncurred).localeCompare(String(a.dateIncurred)) || Number(b.expenseId) - Number(a.expenseId); }).map(function (expense) {
+        var user = users.find(function (u) { return Number(u.userId) === Number(expense.recordedBy); });
+        return '<tr><td>' + expense.expenseId + '</td><td>' + gsEscapeHtml(expense.dateIncurred) + '</td><td>' + gsEscapeHtml(expense.category) +
+          '</td><td>' + gsEscapeHtml(expense.description) + '</td><td>' + gsFormatPeso(expense.amount) + '</td><td>' +
+          gsEscapeHtml(user ? (user.fullName || user.username) : 'Unknown') + '</td><td><button type="button" class="btn btn-danger btn-small" data-delete-expense="' + expense.expenseId + '">Delete</button></td></tr>';
       }).join('');
     }
   };
 
-  function val(id){var e=document.getElementById(id);return e?e.value:'';}
-  function todayKey(){var d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
-  function peso(n){return '₱'+Number(n||0).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2});}
-  function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
-  function fail(error){return {ok:false,error:error};}
-  function setError(id,msg){var e=document.getElementById(id);if(e)e.textContent=msg;}
-  function toast(msg,type){if(typeof window.gsToast==='function')window.gsToast(msg,type);}
+  document.addEventListener('click', function (event) {
+    var deleteButton = event.target.closest('[data-delete-expense]');
+    if (deleteButton) ExpensesModule.deleteExpense(deleteButton.getAttribute('data-delete-expense'));
+  });
+
 })();
 
+window.gsUsers = [
+    { userId: 1, fullName: 'Margie (Co-owner)', username: 'margie', role: 'coOwner' },
+    { userId: 2, fullName: 'Grea (Co-owner)', username: 'grea', role: 'coOwner' },
+    { userId: 3, fullName: 'Carlo Santos', username: 'carlo', role: 'staff' },
+    { userId: 4, fullName: 'Mia Reyes', username: 'mia', role: 'staff' }
+  ];
 
-/* ================= seed data + bootstrap (demo wiring) ================= */
-window.gsSeedMode = true;
+  window.gsOrders = [
+    { orderId: 101, customerId: 1, customerName: 'Ana Cruz', fileName: 'thesis_ch1-3.pdf', serviceType: 'Document Printing', serviceOption: 'Spiral Binding', paperSize: 'A4', pages: 20, copies: 5, colorTier: 'Minimal Color', isRush: false, totalPrice: 300, paymentStatus: 'pending', status: 'done', dateAdded: gsOffsetKey(-4), dateCompleted: gsOffsetKey(-2) },
+    { orderId: 102, customerId: 2, customerName: 'Ben Santos', fileName: 'research.pdf', serviceType: 'Document Printing', serviceOption: 'None', paperSize: 'A4', pages: 50, copies: 1, colorTier: 'Black Text', isRush: false, totalPrice: 300, paymentStatus: 'pending', status: 'done', dateAdded: gsOffsetKey(-5), dateCompleted: gsOffsetKey(-4) },
+    { orderId: 103, customerId: 3, customerName: 'Clara Reyes', fileName: 'portfolio.pdf', serviceType: 'Document Printing', serviceOption: 'Lamination', paperSize: 'Short', pages: 32, copies: 2, colorTier: 'Full Color', isRush: true, totalPrice: 640, paymentStatus: 'pending', status: 'done', dateAdded: gsOffsetKey(-6), dateCompleted: gsOffsetKey(-5) },
+    { orderId: 104, customerId: 4, customerName: 'Daniel Kim', fileName: 'lab_report.pdf', serviceType: 'Document Printing', serviceOption: 'None', paperSize: 'A4', pages: 32, copies: 1, colorTier: 'Black Text', isRush: false, totalPrice: 96, paymentStatus: 'pending', status: 'done', dateAdded: gsOffsetKey(-7), dateCompleted: gsOffsetKey(-6) },
+    { orderId: 105, customerId: 5, customerName: 'Ella Mendoza', fileName: 'handouts.pdf', serviceType: 'Document Printing', serviceOption: 'None', paperSize: 'A4', pages: 150, copies: 1, colorTier: 'Minimal Color', isRush: false, totalPrice: 450, paymentStatus: 'pending', status: 'done', dateAdded: gsOffsetKey(-9), dateCompleted: gsOffsetKey(-8) },
+    { orderId: 106, customerId: 6, customerName: 'Farhan Ali', fileName: 'resume_batch.pdf', serviceType: 'Document Printing', serviceOption: 'None', paperSize: 'Short', pages: 55, copies: 4, colorTier: 'Black Text', isRush: false, totalPrice: 220, paymentStatus: 'pending', status: 'done', dateAdded: gsOffsetKey(-11), dateCompleted: gsOffsetKey(-10) },
+    { orderId: 107, customerId: 7, customerName: 'Gina Torres', fileName: 'yearbook_pages.pdf', serviceType: 'Bookbinding', serviceOption: 'Perfect Binding', paperSize: 'A4', pages: 40, copies: 1, colorTier: 'Small Image', isRush: false, totalPrice: 500, paymentStatus: 'pending', status: 'done', dateAdded: gsOffsetKey(-3), dateCompleted: gsOffsetKey(-1) },
+    { orderId: 108, customerId: 8, customerName: 'Hannah Lim', fileName: 'flyers.pdf', serviceType: 'Document Printing', serviceOption: 'None', paperSize: 'A4', pages: 60, copies: 3, colorTier: 'Full Color', isRush: false, totalPrice: 3600, paymentStatus: 'pending', status: 'printing', dateAdded: gsOffsetKey(-1), dateCompleted: null },
+    { orderId: 109, customerId: 9, customerName: 'Ivan Cruz', fileName: 'module_reader.pdf', serviceType: 'Document Printing', serviceOption: 'Spiral Binding', paperSize: 'A4', pages: 80, copies: 1, colorTier: 'Black Text', isRush: false, totalPrice: 120, paymentStatus: 'pending', status: 'queued', dateAdded: gsTodayKey(), dateCompleted: null },
+    { orderId: 110, customerId: 10, customerName: 'Jasmine Yu', fileName: 'class_notes.pdf', serviceType: 'Document Printing', serviceOption: 'None', paperSize: 'A4', pages: 30, copies: 3, colorTier: 'Black Text', isRush: false, totalPrice: 90, paymentStatus: 'pending', status: 'cancelled', dateAdded: gsOffsetKey(-9), dateCompleted: null },
+    { orderId: 111, customerId: 11, customerName: 'Karl Ramos', fileName: 'btech_blueprint.pdf', serviceType: 'Document Printing', serviceOption: 'None', paperSize: 'A3', pages: 40, copies: 2, colorTier: 'Small Image', isRush: false, totalPrice: 260, paymentStatus: 'pending', status: 'unclaimed', dateAdded: gsOffsetKey(-9), dateCompleted: gsOffsetKey(-7) },
+    { orderId: 112, customerId: 12, customerName: 'Liza Gomez', fileName: 'invite_cards.pdf', serviceType: 'Document Printing', serviceOption: 'Lamination', paperSize: 'Short', pages: 36, copies: 1, colorTier: 'Minimal Color', isRush: true, totalPrice: 180, paymentStatus: 'pending', status: 'done', dateAdded: gsTodayKey(), dateCompleted: gsTodayKey() },
+    { orderId: 999, customerId: 999, customerName: 'Test Customer', fileName: 'TEST-DUMMY-ORDER.pdf', serviceType: 'Document Printing', serviceOption: 'None', paperSize: 'A4', pages: 10, copies: 5, colorTier: 'Black Text', isRush: false, totalPrice: 150, paymentStatus: 'pending', status: 'queued', dateAdded: gsTodayKey(), dateCompleted: null }
+  ];
 
-function gsOffsetKey(offset) {
-  var t = srParseDay(srTodayKey());
-  return srDayKey(t + offset);
-}
+  window.gsSeedExpenses = [
+    { expenseId: 1, category: 'Rent', amount: 3000, description: 'Monthly stall rent', dateIncurred: gsOffsetKey(-7), recordedBy: 1 },
+    { expenseId: 2, category: 'Utilities', amount: 850, description: 'Electricity', dateIncurred: gsOffsetKey(-5), recordedBy: 1 },
+    { expenseId: 3, category: 'Supplies', amount: 1200, description: 'Bond paper (10 reams)', dateIncurred: gsOffsetKey(-3), recordedBy: 2 },
+    { expenseId: 4, category: 'Equipment Repair', amount: 1500, description: 'Printer 2 service center', dateIncurred: gsOffsetKey(-2), recordedBy: 1 },
+    { expenseId: 5, category: 'Supplies', amount: 400, description: 'Ink refills', dateIncurred: gsTodayKey(), recordedBy: 2 }
+  ];
 
-var gsUsers = [
-  { userId: 1, fullName: "Margie (Co-owner)", username: "margie", role: "coOwner" },
-  { userId: 2, fullName: "Grea (Co-owner)",   username: "grea",   role: "coOwner" },
-  { userId: 3, fullName: "Carlo Santos",      username: "carlo",  role: "staff" },
-  { userId: 4, fullName: "Mia Reyes",         username: "mia",    role: "staff" }
-];
+  function seedPayment(orderId, amount, method, isDown, proof) {
+    var queued = PaymentsModule.recordPayment({ orderId: orderId, amount: amount, paymentMethod: method, isDownPayment: isDown, proofOfPaymentFile: proof || '' });
+    if (queued.ok) PaymentsModule.confirmNextPayment();
+  }
 
-/* Seed orders — dates are generated relative to today so the demo always
-   shows data in the default last-14-days sales range. In the full system
-   these records are owned by Module 5 (Order Management). */
-var gsOrders = [
-  { orderId: 101, customerId: 1, customerName: "Ana Cruz",     fileName: "thesis_ch1-3.pdf",    serviceType: "Document Printing", serviceOption: "Spiral Binding",  paperSize: "A4",    pages: 20,  copies: 5, colorTier: "Minimal Color", isRush: false, queueType: "walkIn",  pricePerPage: 5,  baseTotalPrice: 500,  promoId: null, discountAmount: 200, totalPrice: 300,  requiresDownPayment: false, downPaymentAmount: 0,    paymentMethod: "GCash",         paymentStatus: "pending", proofOfPaymentFile: null, status: "done",      dateAdded: gsOffsetKey(-4),  dateCompleted: gsOffsetKey(-2),  unclaimedReason: null, daysUnclaimed: null },
-  { orderId: 102, customerId: 2, customerName: "Brian Santos", fileName: "case_study.pdf",      serviceType: "Document Printing", serviceOption: "None",            paperSize: "A4",    pages: 50,  copies: 1, colorTier: "Black Text",    isRush: false, queueType: "walkIn",  pricePerPage: 3,  baseTotalPrice: 150,  promoId: null, discountAmount: 0,   totalPrice: 150,  requiresDownPayment: true,  downPaymentAmount: 100,  paymentMethod: "Cash",          paymentStatus: "pending", proofOfPaymentFile: null, status: "done",      dateAdded: gsOffsetKey(-4),  dateCompleted: gsOffsetKey(-3),  unclaimedReason: null, daysUnclaimed: null },
-  { orderId: 103, customerId: 3, customerName: "Clara Reyes",  fileName: "portfolio.pdf",       serviceType: "Document Printing", serviceOption: "Lamination",      paperSize: "Short", pages: 32,  copies: 2, colorTier: "Full Color",    isRush: true,  queueType: "advance", pricePerPage: 20, baseTotalPrice: 1280, promoId: null, discountAmount: 640, totalPrice: 640,  requiresDownPayment: false, downPaymentAmount: 0,    paymentMethod: "Cash",          paymentStatus: "pending", proofOfPaymentFile: null, status: "done",      dateAdded: gsOffsetKey(-6),  dateCompleted: gsOffsetKey(-5),  unclaimedReason: null, daysUnclaimed: null },
-  { orderId: 104, customerId: 4, customerName: "Daniel Kim",   fileName: "lab_report.pdf",      serviceType: "Document Printing", serviceOption: "None",            paperSize: "A4",    pages: 32,  copies: 1, colorTier: "Black Text",    isRush: false, queueType: "walkIn",  pricePerPage: 3,  baseTotalPrice: 96,   promoId: null, discountAmount: 0,   totalPrice: 96,   requiresDownPayment: false, downPaymentAmount: 0,    paymentMethod: "Bank Transfer", paymentStatus: "pending", proofOfPaymentFile: null, status: "done",      dateAdded: gsOffsetKey(-7),  dateCompleted: gsOffsetKey(-6),  unclaimedReason: null, daysUnclaimed: null },
-  { orderId: 105, customerId: 5, customerName: "Ella Mendoza", fileName: "handouts.pdf",        serviceType: "Document Printing", serviceOption: "None",            paperSize: "A4",    pages: 150, copies: 1, colorTier: "Minimal Color", isRush: false, queueType: "advance", pricePerPage: 5,  baseTotalPrice: 750,  promoId: null, discountAmount: 300, totalPrice: 450,  requiresDownPayment: false, downPaymentAmount: 0,    paymentMethod: "GCash",         paymentStatus: "pending", proofOfPaymentFile: null, status: "done",      dateAdded: gsOffsetKey(-9),  dateCompleted: gsOffsetKey(-8),  unclaimedReason: null, daysUnclaimed: null },
-  { orderId: 106, customerId: 6, customerName: "Farhan Ali",   fileName: "resume_batch.pdf",    serviceType: "Document Printing", serviceOption: "None",            paperSize: "Short", pages: 55,  copies: 4, colorTier: "Black Text",    isRush: false, queueType: "walkIn",  pricePerPage: 3,  baseTotalPrice: 660,  promoId: null, discountAmount: 440, totalPrice: 220,  requiresDownPayment: false, downPaymentAmount: 0,    paymentMethod: "Cash",          paymentStatus: "pending", proofOfPaymentFile: null, status: "done",      dateAdded: gsOffsetKey(-11), dateCompleted: gsOffsetKey(-10), unclaimedReason: null, daysUnclaimed: null },
-  { orderId: 107, customerId: 7, customerName: "Gina Torres",  fileName: "yearbook_pages.pdf",  serviceType: "Bookbinding",       serviceOption: "Perfect Binding", paperSize: "A4",    pages: 40,  copies: 1, colorTier: "Small Image",   isRush: false, queueType: "advance", pricePerPage: 10, baseTotalPrice: 400,  promoId: null, discountAmount: 0,   totalPrice: 500,  requiresDownPayment: false, downPaymentAmount: 0,    paymentMethod: "GCash",         paymentStatus: "pending", proofOfPaymentFile: null, status: "done",      dateAdded: gsOffsetKey(-3),  dateCompleted: gsOffsetKey(-1),  unclaimedReason: null, daysUnclaimed: null },
-  { orderId: 108, customerId: 8, customerName: "Hannah Lim",   fileName: "flyers.pdf",          serviceType: "Document Printing", serviceOption: "None",            paperSize: "A4",    pages: 60,  copies: 3, colorTier: "Full Color",    isRush: false, queueType: "walkIn",  pricePerPage: 20, baseTotalPrice: 3600, promoId: null, discountAmount: 0,   totalPrice: 3600, requiresDownPayment: true,  downPaymentAmount: 1800, paymentMethod: "Cash",          paymentStatus: "pending", proofOfPaymentFile: null, status: "printing",  dateAdded: gsOffsetKey(-1),  dateCompleted: null,               unclaimedReason: null, daysUnclaimed: null },
-  { orderId: 109, customerId: 9, customerName: "Ivan Cruz",    fileName: "module_reader.pdf",   serviceType: "Document Printing", serviceOption: "Spiral Binding",  paperSize: "A4",    pages: 80,  copies: 1, colorTier: "Black Text",    isRush: false, queueType: "walkIn",  pricePerPage: 3,  baseTotalPrice: 240,  promoId: null, discountAmount: 120, totalPrice: 120,  requiresDownPayment: false, downPaymentAmount: 0,    paymentMethod: "Cash",          paymentStatus: "pending", proofOfPaymentFile: null, status: "queued",    dateAdded: gsOffsetKey(0),   dateCompleted: null,               unclaimedReason: null, daysUnclaimed: null },
-  { orderId: 110, customerId: 10, customerName: "Jasmine Yu",  fileName: "class_notes.pdf",     serviceType: "Document Printing", serviceOption: "None",            paperSize: "A4",    pages: 30,  copies: 3, colorTier: "Black Text",    isRush: false, queueType: "walkIn",  pricePerPage: 3,  baseTotalPrice: 270,  promoId: null, discountAmount: 180, totalPrice: 90,   requiresDownPayment: false, downPaymentAmount: 0,    paymentMethod: "Cash",          paymentStatus: "pending", proofOfPaymentFile: null, status: "cancelled", dateAdded: gsOffsetKey(-9),  dateCompleted: null,               unclaimedReason: "cancelled classes", daysUnclaimed: null },
-  { orderId: 111, customerId: 11, customerName: "Karl Ramos",  fileName: "btech_blueprint.pdf", serviceType: "Document Printing", serviceOption: "None",            paperSize: "A3",    pages: 40,  copies: 2, colorTier: "Small Image",   isRush: false, queueType: "advance", pricePerPage: 10, baseTotalPrice: 800,  promoId: null, discountAmount: 540, totalPrice: 260,  requiresDownPayment: false, downPaymentAmount: 0,    paymentMethod: "GCash",         paymentStatus: "pending", proofOfPaymentFile: null, status: "unclaimed", dateAdded: gsOffsetKey(-9),  dateCompleted: gsOffsetKey(-7),  unclaimedReason: "did not show up",   daysUnclaimed: 7 },
-  { orderId: 112, customerId: 12, customerName: "Liza Gomez",  fileName: "invite_cards.pdf",    serviceType: "Document Printing", serviceOption: "Lamination",      paperSize: "Short", pages: 36,  copies: 1, colorTier: "Minimal Color", isRush: true,  queueType: "advance", pricePerPage: 5,  baseTotalPrice: 180,  promoId: null, discountAmount: 0,   totalPrice: 180,  requiresDownPayment: false, downPaymentAmount: 0,    paymentMethod: "Cash",          paymentStatus: "pending", proofOfPaymentFile: null, status: "done",      dateAdded: gsOffsetKey(0),   dateCompleted: gsOffsetKey(0),   unclaimedReason: null, daysUnclaimed: null },
-  { orderId: 999, customerId: 999, customerName: "Test Customer", fileName: "TEST-DUMMY-ORDER.pdf", serviceType: "Document Printing", serviceOption: "None", paperSize: "A4", pages: 10, copies: 5, colorTier: "Black Text", isRush: false, queueType: "walkIn", pricePerPage: 3, baseTotalPrice: 150, promoId: null, discountAmount: 0, totalPrice: 150, requiresDownPayment: false, downPaymentAmount: 0, paymentMethod: "Cash", paymentStatus: "pending", proofOfPaymentFile: null, status: "queued", dateAdded: gsOffsetKey(0), dateCompleted: null, unclaimedReason: null, daysUnclaimed: null }
-];
+  function resetDemoData() {
+    /* Reset order state to pending before rebuilding payment history. */
+    gsOrders.forEach(function (order) {
+      order.paymentStatus = 'pending';
+      order.downPaymentAmount = 0;
+    });
+    ExpensesModule.init(gsSeedExpenses);
+    ExpensesModule.setUsers(gsUsers);
+    PaymentsModule.init(gsOrders, { onPaymentReceived: function () {} });
 
-var gsSeedExpenses = [
-  { expenseId: 1, category: "Rent",             amount: 3000, description: "Monthly stall rent",       dateIncurred: gsOffsetKey(-7), recordedBy: 1 },
-  { expenseId: 2, category: "Utilities",        amount: 850,  description: "Electricity",              dateIncurred: gsOffsetKey(-5), recordedBy: 1 },
-  { expenseId: 3, category: "Supplies",         amount: 1200, description: "Bond paper (10 reams)",    dateIncurred: gsOffsetKey(-3), recordedBy: 2 },
-  { expenseId: 4, category: "Equipment Repair", amount: 1500, description: "Printer 2 service center", dateIncurred: gsOffsetKey(-2), recordedBy: 1 },
-  { expenseId: 5, category: "Supplies",         amount: 400,  description: "Ink refills",              dateIncurred: gsOffsetKey(0),  recordedBy: 2 }
-];
+    seedPayment(101, 300, 'GCash', false, 'gcash_ref_0101.png');
+    seedPayment(103, 640, 'Cash', false, '');
+    seedPayment(104, 96, 'Bank Transfer', false, 'bt_ref_8842.png');
+    seedPayment(105, 450, 'GCash', false, 'gcash_ref_0105.png');
+    seedPayment(106, 220, 'Cash', false, '');
+    seedPayment(107, 500, 'GCash', false, 'gcash_ref_0107.png');
+    seedPayment(112, 180, 'Cash', false, '');
+    seedPayment(102, 100, 'Cash', true, '');
 
-function gsSeedPayment(orderId, amount, method, isDown, proof) {
-  var r = PaymentsModule.recordPayment({
-    orderId: orderId, amount: amount, paymentMethod: method,
-    isDownPayment: isDown, proofOfPaymentFile: proof
-  });
-  if (r.ok) { PaymentsModule.confirmNextPayment(); }
-}
+    SalesModule.setExpenseProvider(function () { return ExpensesModule.getAllExpenses(); });
+    SalesModule.init(gsOrders);
+    PaymentsModule.renderAll();
+    ExpensesModule.renderAll();
+    setSystemStatus('System ready — Modules 7–9 are active', 'Demo accounts, orders, payments, receipts, and expenses are loaded. Use Order #999 for a fresh payment test.', true);
+  }
 
-document.addEventListener("DOMContentLoaded", function () {
-  ExpensesModule.init(gsSeedExpenses, null);
-  ExpensesModule.setUsers(gsUsers);
+  /* Navigation */
+  window.showSection = function (name) {
+    var sections = { payments: 'section-payments', sales: 'section-sales', expenses: 'section-expenses' };
+    var navs = { payments: 'navPayments', sales: 'navSales', expenses: 'navExpenses' };
+    Object.keys(sections).forEach(function (key) {
+      var section = document.getElementById(sections[key]);
+      if (section) section.style.display = key === name ? 'block' : 'none';
+      var nav = document.getElementById(navs[key]);
+      if (nav) nav.classList.toggle('active', key === name);
+    });
+  };
 
-  PaymentsModule.init(gsOrders, {
-    onPaymentReceived: function (type, order, payment) {   // Module 16 hook
-      if (window.gsSeedMode) { return; }
-      gsToast("Payment received for Order #" + order.orderId + ": " +
-        gsFormatPeso(payment.amount) + " (" + payment.paymentMethod + ")", "success");
+  window.closeReceiptModal = function () {
+    var modal = document.getElementById('receiptModal');
+    if (modal) modal.classList.remove('open');
+  };
+
+  document.addEventListener('DOMContentLoaded', function () {
+    try {
+      document.getElementById('btnResetDemo').addEventListener('click', resetDemoData);
+      resetDemoData();
+      showSection('payments');
+    } catch (error) {
+      console.error('Grea San Jave initialization failed:', error);
+      setSystemStatus('System initialization failed', error && error.message ? error.message : String(error), false);
+      gsToast('System initialization failed. Open the browser console for details.', 'error');
     }
   });
 
-  // Seed confirmed payment history through the public FIFO flow.
-  gsSeedPayment(101, 300, "GCash", false, "gcash_ref_0101.png");
-  gsSeedPayment(103, 640, "Cash", false, "");
-  gsSeedPayment(104, 96,  "Bank Transfer", false, "bt_ref_8842.png");
-  gsSeedPayment(105, 450, "GCash", false, "gcash_ref_0105.png");
-  gsSeedPayment(106, 220, "Cash", false, "");
-  gsSeedPayment(107, 500, "GCash", false, "gcash_ref_0107.png");
-  gsSeedPayment(112, 180, "Cash", false, "");
-  gsSeedPayment(102, 100, "Cash", true,  "");   // down payment — still partially paid
-
-  SalesModule.setExpenseProvider(function () { return ExpensesModule.getAllExpenses(); });
-  SalesModule.init(gsOrders);
-
-  window.gsSeedMode = false;
-  PaymentsModule.renderAll();
-});
-
-/* Section navigation — uses only .app-nav styles from anika.css (no tabs added) */
-function showSection(name) {
-  var sections = { payments: "section-payments", sales: "section-sales", expenses: "section-expenses" };
-  var navs = { payments: "navPayments", sales: "navSales", expenses: "navExpenses" };
-  var k;
-  for (k in sections) {
-    var sec = document.getElementById(sections[k]);
-    if (sec !== null) { sec.style.display = (k === name) ? "block" : "none"; }
-    var nav = document.getElementById(navs[k]);
-    if (nav !== null) { nav.className = (k === name) ? "active" : ""; }
-  }
-}
-
-function closeReceiptModal() {
-  var modal = document.getElementById("receiptModal");
-  if (modal !== null) { modal.className = "modal-overlay"; }
-}
 </script>
 
 </body>
